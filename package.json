@@ -1,0 +1,12 @@
+{
+  "name": "minecraft-keepalive-bot",
+  "version": "1.0.0",
+  "description": "Minecraft bot to keep an Aternos server active",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "dependencies": {
+    "mineflayer": "^4.23.0"
+  }
+}
