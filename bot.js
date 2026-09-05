@@ -63,7 +63,8 @@ function createBot() {
   })
 
   bot.on('kicked', (reason) => {
-    console.log(`[${time()}] Kicked: ${reason}`)
+    const msg = typeof reason === 'string' ? reason : JSON.stringify(reason)
+    console.log(`[${time()}] Kicked: ${msg}`)
     connected = false
     reconnectAfterDelay('kick')
   })
