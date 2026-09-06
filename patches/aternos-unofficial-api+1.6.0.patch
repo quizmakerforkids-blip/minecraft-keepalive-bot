@@ -1,8 +1,8 @@
 diff --git a/node_modules/aternos-unofficial-api/dist/index.js b/node_modules/aternos-unofficial-api/dist/index.js
-index 56ceb39..3750c4c 100644
+index 56ceb39..968292e 100644
 --- a/node_modules/aternos-unofficial-api/dist/index.js
 +++ b/node_modules/aternos-unofficial-api/dist/index.js
-@@ -48,10 +48,21 @@ function resolveChromiumPath() {
+@@ -48,11 +48,21 @@ function resolveChromiumPath() {
      "../../stable-chromium/chrome-linux/chrome-linux64/chrome"
    );
    if (import_fs.default.existsSync(localPath)) return localPath;
@@ -22,11 +22,12 @@ index 56ceb39..3750c4c 100644
 +    return (0, import_child_process.execSync)(cmd).toString().trim();
    } catch {
 -    console.error("Chromium not found. Install with apt.");
-+    console.error("Chromium not found. Install Chrome or Edge, or set CHROME_PATH.");
-     process.exit(1);
+-    process.exit(1);
++    throw new Error("Chromium not found. Install Chrome or Edge, or set CHROME_PATH.");
    }
  }
-@@ -271,7 +282,7 @@ async function manageServer(cookies, serverId, task) {
+ function getFreePort() {
+@@ -271,7 +281,7 @@ async function manageServer(cookies, serverId, task) {
              const timeRemaining = await page.evaluate(() => document.querySelector(".server-end-countdown")?.textContent?.trim() || "N/A");
              return { success: true, message: "Server is already online.", status: "Online", timeRemaining };
            }

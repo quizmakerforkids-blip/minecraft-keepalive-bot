@@ -14,10 +14,40 @@ const CONFIG = {
   port: parseInt(process.env.MC_PORT || '54684', 10),
   username: process.env.MC_USERNAME || 'KeepBot',
   auth: 'offline',
-  idleInterval: 45000,
   startTimeout: 10 * 60 * 1000,
   checkInterval: 2 * 60 * 1000,
   offlineRetry: 5 * 60 * 1000
+}
+
+const BEHAVIOR = {
+  idleMin: 4000,
+  idleMax: 15000,
+  moveMin: 2500,
+  moveMax: 7000,
+  chatMin: 8 * 60 * 1000,
+  chatMax: 12 * 60 * 1000,
+  smallTalk: [
+    'yo',
+    'heya',
+    'nice place you got here',
+    'anyone around?',
+    'just chilling',
+    'good build',
+    'brb one sec',
+    'anyone need anything?',
+    'this server is fun',
+    'afk for a bit',
+    'lemme get some wood',
+    'hi hi'
+  ],
+  replies: [
+    'that is me haha',
+    'just hanging around',
+    'I am here if you need anything',
+    'yep that\'s me',
+    'oh hey',
+    'I am just a chill guy doing nothing'
+  ]
 }
 
 const ATERNOS_USER = process.env.ATERNOS_USER
@@ -25,9 +55,12 @@ const ATERNOS_PASS = process.env.ATERNOS_PASS
 const MC_SERVER_ID = process.env.MC_SERVER_ID || 'SSVMBOYS'
 
 let bot = null
-let idleTimer = null
 let connected = false
 let running = true
+let browserOk = true
+let behaviorTimer = null
+let chatTimer = null
+let nextChatAt = Date.now() + 60000
 
 const server = http.createServer((req, res) => {
   const payload = {
@@ -43,23 +76,6 @@ const server = http.createServer((req, res) => {
 server.listen(process.env.PORT || 3000, () => {
   console.log(`[${time()}] Health server listening on port ${server.address().port}`)
 })
-
-function pingPort(host = CONFIG.host, port = CONFIG.port, timeout = 5000) {
-  return new Promise((resolve) => {
-    const sock = net.connect({ host, port })
-    sock.setTimeout(timeout)
-    let done = false
-    const finish = (ok) => {
-      if (done) return
-      done = true
-      sock.destroy()
-      resolve(ok)
-    }
-    sock.once('connect', () => finish(true))
-    sock.once('timeout', () => finish(false))
-    sock.once('error', () => finish(false))
-  })
-}
 
 function mcReady(timeout = 5000) {
   return new Promise((resolve) => {
@@ -82,9 +98,17 @@ function findServerId(servers) {
   return match ? match.id : servers[0] ? servers[0].id : null
 }
 
+function looksLikeAternosId(value) {
+  return /^[A-Za-z0-9]{10,}$/.test(value)
+}
+
 async function startAternosServer() {
   if (!hasAternosSession() && (!ATERNOS_USER || !ATERNOS_PASS)) {
     console.log(`[${time()}] No Aternos session or credentials — server not started automatically.`)
+    return false
+  }
+  if (!browserOk) {
+    console.log(`[${time()}] Aternos browser API unavailable here — will wait for the server to be started elsewhere.`)
     return false
   }
   let cookies = readCookies()
@@ -93,13 +117,16 @@ async function startAternosServer() {
     try {
       cookies = await Aternos.loginToAternos(ATERNOS_USER, ATERNOS_PASS)
     } catch (err) {
-      console.log(`[${time()}] Aternos login failed: ${err.message}`)
+      handleAternosError(err)
       return false
     }
   }
   try {
-    const { servers } = await Aternos.getServerList(cookies)
-    const id = findServerId(servers)
+    let id = looksLikeAternosId(MC_SERVER_ID) ? MC_SERVER_ID : null
+    if (!id) {
+      const { servers } = await Aternos.getServerList(cookies)
+      id = findServerId(servers)
+    }
     if (!id) {
       console.log(`[${time()}] Could not find server '${MC_SERVER_ID}' in your Aternos account.`)
       return false
@@ -113,8 +140,20 @@ async function startAternosServer() {
     }
     return false
   } catch (err) {
-    console.log(`[${time()}] Aternos API error: ${err.message}`)
+    handleAternosError(err)
     return false
+  }
+}
+
+function handleAternosError(err) {
+  const msg = (err && err.message) || String(err)
+  if (/chrom|browser|executable|no display/i.test(msg)) {
+    if (browserOk) {
+      browserOk = false
+      console.log(`[${time()}] No usable browser on this host — Aternos auto-start is disabled here (it still monitor/waits).`)
+    }
+  } else {
+    console.log(`[${time()}] Aternos API error: ${msg}`)
   }
 }
 
@@ -170,6 +209,94 @@ function hasAternosSession() {
   return !!process.env.ATERNOS_COOKIES || fs.existsSync(COOKIES_PATH)
 }
 
+// ---------------- human-like behavior ----------------
+
+function randInt(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min
+}
+
+function pick(arr) {
+  return arr[Math.floor(Math.random() * arr.length)]
+}
+
+function clearControl(keys) {
+  if (!bot) return
+  keys.forEach((k) => bot.setControlState(k, false))
+}
+
+function startBehavior() {
+  if (behaviorTimer) clearTimeout(behaviorTimer)
+  if (chatTimer) clearTimeout(chatTimer)
+  scheduleBehavior()
+  scheduleChat()
+}
+
+function scheduleBehavior() {
+  if (!bot || !bot.entity || !running) return
+  behaviorTimer = setTimeout(doRandomAction, randInt(BEHAVIOR.idleMin, BEHAVIOR.idleMax))
+}
+
+function doRandomAction() {
+  if (!bot || !bot.entity || !connected) {
+    scheduleBehavior()
+    return
+  }
+  const roll = Math.random()
+  if (roll < 0.4) {
+    const key = pick(['forward', 'back', 'left', 'right'])
+    bot.setControlState(key, true)
+    const duration = randInt(BEHAVIOR.moveMin, BEHAVIOR.moveMax)
+    bot.look(
+      bot.entity.yaw + (Math.random() * 1.6 - 0.8),
+      clampPitch(bot.entity.pitch + (Math.random() - 0.5) * 0.4)
+    )
+    setTimeout(() => {
+      clearControl([key])
+      scheduleBehavior()
+    }, duration)
+  } else if (roll < 0.55) {
+    bot.setControlState('jump', true)
+    setTimeout(() => {
+      bot.setControlState('jump', false)
+      scheduleBehavior()
+    }, 600)
+  } else if (roll < 0.7) {
+    bot.look(Math.random() * Math.PI * 2, (Math.random() - 0.5) * 0.8)
+    setTimeout(scheduleBehavior, 900)
+  } else {
+    scheduleBehavior()
+  }
+}
+
+function clampPitch(p) {
+  return Math.max(-Math.PI / 2, Math.min(Math.PI / 2, p))
+}
+
+function scheduleChat() {
+  if (!bot || !running) return
+  const delay = Math.max(BEHAVIOR.chatMin, nextChatAt - Date.now())
+  chatTimer = setTimeout(() => {
+    if (!bot || !bot.entity || !connected) {
+      scheduleChat()
+      return
+    }
+    bot.chat(pick(BEHAVIOR.smallTalk))
+    nextChatAt = Date.now() + randInt(BEHAVIOR.chatMin, BEHAVIOR.chatMax)
+    scheduleChat()
+  }, delay)
+}
+
+function respond(text) {
+  const lower = text.toLowerCase()
+  if (lower.startsWith('!ping') || /(!|\?)bot\b|keepbot|\bkeep\b/i.test(lower) || lower.includes(CONFIG.username.toLowerCase())) {
+    if (Math.random() < 0.7) {
+      bot.chat(pick(BEHAVIOR.replies))
+    }
+  }
+}
+
+// ---------------- minecraft client ----------------
+
 function createBot() {
   if (!running) return
   console.log(`[${time()}] Connecting to ${CONFIG.host}:${CONFIG.port}...`)
@@ -184,7 +311,7 @@ function createBot() {
   bot.on('login', () => {
     console.log(`[${time()}] Logged in as ${bot.username}`)
     connected = true
-    startIdleMovement()
+    startBehavior()
   })
 
   bot.on('spawn', () => {
@@ -194,11 +321,13 @@ function createBot() {
   bot.on('message', (msg) => {
     const text = msg.toString().replace(/§./g, '')
     console.log(`[chat] ${text}`)
-    if (/whisper|msg|tell/.test(text.toLowerCase())) {
-      bot.chat('I am here to keep the server alive!')
-    }
-    if (text.startsWith('!ping')) {
-      bot.chat('Pong! I am awake.')
+    respond(text)
+  })
+
+  bot.on('health', () => {
+    if (bot && bot.health <= 0) {
+      console.log(`[${time()}] Died — respawning.`)
+      bot.respawn()
     }
   })
 
@@ -217,28 +346,18 @@ function createBot() {
     console.log(`[${time()}] Bot disconnected.`)
     bot = null
     connected = false
-    if (idleTimer) {
-      clearInterval(idleTimer)
-      idleTimer = null
+    if (behaviorTimer) {
+      clearTimeout(behaviorTimer)
+      behaviorTimer = null
+    }
+    if (chatTimer) {
+      clearTimeout(chatTimer)
+      chatTimer = null
     }
   })
 }
 
-function startIdleMovement() {
-  if (idleTimer) clearInterval(idleTimer)
-  idleTimer = setInterval(wiggle, CONFIG.idleInterval)
-}
-
-function wiggle() {
-  if (!bot || !bot.entity) return
-  bot.setControlState('forward', true)
-  bot.setControlState('jump', true)
-  setTimeout(() => {
-    bot.setControlState('forward', false)
-    bot.setControlState('jump', false)
-    console.log(`[${time()}] Wiggled to stay active.`)
-  }, 1000)
-}
+// ---------------- supervisor ----------------
 
 async function supervisor() {
   while (running) {
@@ -254,8 +373,14 @@ async function supervisor() {
       continue
     }
 
-    if (!ATERNOS_USER || !ATERNOS_PASS) {
-      console.log(`[${time()}] Server is offline. Add ATERNOS_USER and ATERNOS_PASS to .env to auto-start it.`)
+    if (!hasAternosSession() && (!ATERNOS_USER || !ATERNOS_PASS)) {
+      console.log(`[${time()}] Server is offline. Add ATERNOS_USER/ATERNOS_PASS (or ATERNOS_COOKIES) to auto-start it.`)
+      await sleep(CONFIG.offlineRetry)
+      continue
+    }
+
+    if (!browserOk) {
+      console.log(`[${time()}] Server offline & auto-start unavailable (no browser here) — waiting for it to come up.`)
       await sleep(CONFIG.offlineRetry)
       continue
     }
@@ -283,7 +408,8 @@ supervisor()
 process.on('SIGTERM', () => {
   console.log('[bot] Shutting down...')
   running = false
-  if (idleTimer) clearInterval(idleTimer)
+  if (behaviorTimer) clearTimeout(behaviorTimer)
+  if (chatTimer) clearTimeout(chatTimer)
   if (bot) bot.end()
   process.exit(0)
 })
