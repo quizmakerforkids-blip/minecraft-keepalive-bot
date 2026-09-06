@@ -288,7 +288,9 @@ function scheduleChat() {
 
 function respond(text) {
   const lower = text.toLowerCase()
-  if (lower.startsWith('!ping') || /(!|\?)bot\b|keepbot|\bkeep\b/i.test(lower) || lower.includes(CONFIG.username.toLowerCase())) {
+  if (lower.startsWith(`<${CONFIG.username.toLowerCase()}`)) return
+  if (/joined the game|left the game/.test(lower)) return
+  if (lower.startsWith('!ping') || lower.includes(CONFIG.username.toLowerCase())) {
     if (Math.random() < 0.7) {
       bot.chat(pick(BEHAVIOR.replies))
     }
@@ -325,9 +327,18 @@ function createBot() {
   })
 
   bot.on('health', () => {
-    if (bot && bot.health <= 0) {
+    if (!bot) return
+    if (bot.health <= 0) {
       console.log(`[${time()}] Died — respawning.`)
       bot.respawn()
+      return
+    }
+    if (bot.health < 10) {
+      const key = pick(['forward', 'back', 'left', 'right'])
+      bot.setControlState(key, true)
+      setTimeout(() => {
+        clearControl([key])
+      }, 1500)
     }
   })
 
