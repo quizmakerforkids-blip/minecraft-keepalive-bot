@@ -83,14 +83,21 @@ function findServerId(servers) {
 }
 
 async function startAternosServer() {
-  if (!ATERNOS_USER || !ATERNOS_PASS) {
-    console.log(`[${time()}] Aternos credentials missing — server not started automatically.`)
+  if (!hasAternosSession() && (!ATERNOS_USER || !ATERNOS_PASS)) {
+    console.log(`[${time()}] No Aternos session or credentials — server not started automatically.`)
     return false
   }
-  ensureCookies()
-  try {
+  let cookies = readCookies()
+  if (!cookies) {
     console.log(`[${time()}] Logging into Aternos...`)
-    const cookies = await Aternos.loginToAternos(ATERNOS_USER, ATERNOS_PASS)
+    try {
+      cookies = await Aternos.loginToAternos(ATERNOS_USER, ATERNOS_PASS)
+    } catch (err) {
+      console.log(`[${time()}] Aternos login failed: ${err.message}`)
+      return false
+    }
+  }
+  try {
     const { servers } = await Aternos.getServerList(cookies)
     const id = findServerId(servers)
     if (!id) {
@@ -140,6 +147,27 @@ function ensureCookies() {
     console.log(`[${time()}] Could not restore cookies: ${err.message}`)
     return false
   }
+}
+
+function readCookies() {
+  if (!ensureCookies()) return null
+  try {
+    if (!fs.existsSync(COOKIES_PATH)) return null
+    const parsed = JSON.parse(fs.readFileSync(COOKIES_PATH, 'utf8'))
+    const hasSession = Array.isArray(parsed) && parsed.some((c) => c && c.name === 'ATERNOS_SESSION')
+    if (!hasSession) {
+      console.log(`[${time()}] Cookie file has no ATERNOS_SESSION.`)
+      return null
+    }
+    return parsed
+  } catch (err) {
+    console.log(`[${time()}] Cookie file unreadable: ${err.message}`)
+    return null
+  }
+}
+
+function hasAternosSession() {
+  return !!process.env.ATERNOS_COOKIES || fs.existsSync(COOKIES_PATH)
 }
 
 function createBot() {
