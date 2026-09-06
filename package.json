@@ -1,14 +1,14 @@
 {
   "name": "minecraft-keepalive-bot",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Minecraft bot that auto-starts an Aternos server and keeps it active",
   "main": "bot.js",
   "scripts": {
     "start": "node bot.js",
-    "postinstall": "patch-package"
+    "postinstall": "patch-package || true"
   },
   "dependencies": {
-    "aternos-unofficial-api": "^1.6.0",
+    "aternos-unofficial-api": "1.6.0",
     "dotenv": "^16.4.5",
     "minecraft-protocol": "^1.48.0",
     "mineflayer": "^4.23.0"
@@ -16,4 +16,5 @@
   "devDependencies": {
     "patch-package": "^8.0.1"
   }
+}
 }
