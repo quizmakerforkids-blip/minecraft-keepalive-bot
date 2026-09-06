@@ -1,9 +1,13 @@
 const http = require('http')
 const net = require('net')
+const fs = require('fs')
+const path = require('path')
 require('dotenv').config()
 const mineflayer = require('mineflayer')
 const mc = require('minecraft-protocol')
 const Aternos = require('aternos-unofficial-api')
+
+const COOKIES_PATH = path.resolve(process.cwd(), 'aternos-cookies.json')
 
 const CONFIG = {
   host: process.env.MC_HOST || 'SSVMBOYS.aternos.me',
@@ -83,6 +87,7 @@ async function startAternosServer() {
     console.log(`[${time()}] Aternos credentials missing — server not started automatically.`)
     return false
   }
+  ensureCookies()
   try {
     console.log(`[${time()}] Logging into Aternos...`)
     const cookies = await Aternos.loginToAternos(ATERNOS_USER, ATERNOS_PASS)
@@ -93,9 +98,13 @@ async function startAternosServer() {
       return false
     }
     console.log(`[${time()}] Starting Aternos server (${id})...`)
-    const res = await Aternos.manageServer(cookies, id, 'start')
-    console.log(`[${time()}] Aternos start request -> ${JSON.stringify(res)}`)
-    return true
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const res = await Aternos.manageServer(cookies, id, 'start')
+      console.log(`[${time()}] Aternos start attempt ${attempt} -> ${JSON.stringify(res)}`)
+      if (res && res.success) return true
+      await sleep(8000)
+    }
+    return false
   } catch (err) {
     console.log(`[${time()}] Aternos API error: ${err.message}`)
     return false
@@ -113,6 +122,24 @@ async function waitForServer(maxMs) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function ensureCookies() {
+  if (fs.existsSync(COOKIES_PATH)) return true
+  const raw = process.env.ATERNOS_COOKIES
+  if (!raw) return false
+  try {
+    let data = raw
+    if (!data.trim().startsWith('[')) {
+      data = Buffer.from(data, 'base64').toString('utf8')
+    }
+    fs.writeFileSync(COOKIES_PATH, data)
+    console.log(`[${time()}] Restored Aternos session cookies from env.`)
+    return true
+  } catch (err) {
+    console.log(`[${time()}] Could not restore cookies: ${err.message}`)
+    return false
+  }
 }
 
 function createBot() {
